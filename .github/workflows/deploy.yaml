@@ -2,6 +2,10 @@ name: github workflow
 
 on:
   workflow_dispatch:
+    inputs:
+      bucket-name:
+        required: true
+        type: string
 
 
 jobs:
@@ -14,6 +18,7 @@ jobs:
     steps:
       - name: Send initial slack message
         uses: slackapi/slack-github-action@v1.26.0
+        continue-on-error: true
         with:
             # See also: https://api.slack.com/methods/chat.postMessage#channels
             channel-id: notify-deployments
@@ -29,5 +34,81 @@ jobs:
                   }
                 ]
               }
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        if: ${{inputs.package-manager == 'npm'}}
+        run: npm install
+
+      - name: Build
+        if: ${{inputs.package-manager == 'npm'}}
+        env:
+          CI: false
+        run: npm run build
+      
+      - name: Configure AWS credentials
+        if: ((github.event_name == 'push' || github.event_name == 'workflow_dispatch'))
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-region: eu-central-1
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token	: ${{ secrets.AWS_SESSION_TOKEN }}
+
+      - name: Deploy
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch' )
+        run: |
+          pwd
+          ls -la
+          aws s3 sync ./build/ s3://${{inputs.bucket-name}}
+      
+
+      - name: slack success message
+        if: ${{ success() }}
+        uses: slackapi/slack-github-action@v1.26.0
+        continue-on-error: true
+        with:
+          channel-id: notify-deployments
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":white_check_mark: Deployment on *${{ github.event.repository.name }}* for *action: ${{ github.workflow }}* has succeeded which was triggered by :bowtie: *${{ github.actor }}* on branch *${{ github.ref }}*  .. \n*Links:* (<${{ github.event.pull_request.html_url || github.event.head_commit.url }}|diff>, <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|job logs>)"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: slack failure message
+        if: ${{ failure()}} 
+        uses: slackapi/slack-github-action@v1.26.0
+        continue-on-error: true
+        with:
+          channel-id: notify-deployments
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":x: Deployment on *${{ github.event.repository.name }}* for *action: ${{ github.workflow }}* has *failed. Please check the logs.* This build was triggered by :bowtie: *${{ github.actor }}* on branch *${{ github.ref }}*  .. \n*Links:* (<${{ github.event.pull_request.html_url || github.event.head_commit.url }}|diff>, <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|job logs>)"
+                  }
+                }
+              ]
+            }
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
