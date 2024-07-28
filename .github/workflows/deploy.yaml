@@ -45,17 +45,14 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        if: ${{inputs.package-manager == 'npm'}}
         run: npm install
 
       - name: Build
-        if: ${{inputs.package-manager == 'npm'}}
         env:
           CI: false
         run: npm run build
       
       - name: Configure AWS credentials
-        if: ((github.event_name == 'push' || github.event_name == 'workflow_dispatch'))
         uses: aws-actions/configure-aws-credentials@v1
         with:
           aws-region: eu-central-1
